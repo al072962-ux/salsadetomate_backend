@@ -114,7 +114,7 @@ class RecipeController extends Controller
             ->loadAvg('ratings as average_rating', 'stars')
             ->loadCount(['ratings', 'likes', 'comments']);
 
-        return response()->json(RecipeResource::make($recipe), 201);
+        return RecipeResource::make($recipe)->response()->setStatusCode(201);
     }
 
     public function update(
