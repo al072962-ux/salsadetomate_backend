@@ -22,6 +22,13 @@ Archivo clave de configuración:
 
 - [config/database.php](/home/josemanuel/Desktop/salsadetomate_backend/config/database.php)
 
+
+
+## Diagrama de base de datos
+
+<img width="2432" height="5222" alt="salsadetomate_db_diagram (1)" src="https://github.com/user-attachments/assets/63edecbe-5725-4a10-a878-b02dac913b43" />
+
+
 ## Documentación API (dos formatos)
 
 1. **README (esta guía)** con explicación funcional + ejemplos `curl`.
