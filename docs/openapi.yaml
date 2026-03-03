@@ -1,0 +1,1126 @@
+openapi: 3.0.3
+info:
+  title: Salsa de Tomate API
+  version: 1.0.0
+  description: |
+    API REST para la red social de recetas.
+
+    Esta especificación documenta el MVP backend con:
+    - autenticación por Bearer token
+    - recetas con estado draft/published
+    - galería y foto principal obligatoria para publicar
+    - ratings y reseñas (usuarios autenticados o invitados)
+    - feed de recomendación diaria
+
+    > **Creador: Jose Manuel Castillo Queh**
+servers:
+  - url: http://localhost:8000
+    description: Servidor local
+security:
+  - bearerAuth: []
+tags:
+  - name: Auth
+    description: Registro, login y sesión.
+  - name: Profile
+    description: Personalización de cuenta de usuario (nombre, bio, avatar).
+  - name: Recipes
+    description: Gestión principal de recetas.
+  - name: Media
+    description: Galería de imágenes/videos por receta.
+  - name: Ratings
+    description: Calificaciones y reseñas.
+  - name: Categories
+    description: Categorías globales y personalizadas.
+  - name: Feed
+    description: Descubrimiento y recomendación diaria.
+
+paths:
+  /api/auth/register:
+    post:
+      tags: [Auth]
+      summary: Registrar usuario
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RegisterRequest'
+            example:
+              name: Jose Manuel
+              email: jose@example.com
+              password: password123
+              password_confirmation: password123
+      responses:
+        '201':
+          description: Usuario creado y token emitido
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthResponse'
+              example:
+                token_type: Bearer
+                access_token: 0a8d4f7...
+                user:
+                  id: 1
+                  name: Jose Manuel
+                  email: jose@example.com
+                  role: member
+                  bio: null
+                  avatar_url: null
+        '422':
+          description: Error de validación
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ValidationError'
+
+  /api/auth/login:
+    post:
+      tags: [Auth]
+      summary: Iniciar sesión
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoginRequest'
+            example:
+              email: jose@example.com
+              password: password123
+      responses:
+        '200':
+          description: Login correcto
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthResponse'
+        '422':
+          description: Credenciales inválidas
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ValidationError'
+
+  /api/auth/me:
+    get:
+      tags: [Auth]
+      summary: Obtener usuario autenticado
+      responses:
+        '200':
+          description: Perfil del usuario
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/User'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /api/auth/logout:
+    post:
+      tags: [Auth]
+      summary: Cerrar sesión actual
+      responses:
+        '200':
+          description: Sesión cerrada
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+              example:
+                message: Sesión cerrada correctamente.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /api/profile:
+    get:
+      tags: [Profile]
+      summary: Obtener perfil autenticado
+      responses:
+        '200':
+          description: Datos de perfil
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserResourceResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+    patch:
+      tags: [Profile]
+      summary: Actualizar perfil (nombre, bio, avatar_url externo)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProfileUpdateRequest'
+            example:
+              name: Jose Manuel Castillo
+              bio: Me gusta compartir recetas caseras.
+      responses:
+        '200':
+          description: Perfil actualizado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserResourceResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '422':
+          description: Error de validación
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ValidationError'
+
+  /api/profile/avatar:
+    post:
+      tags: [Profile]
+      summary: Subir avatar (archivo de imagen)
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/ProfileAvatarUploadRequest'
+      responses:
+        '200':
+          description: Avatar actualizado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserResourceResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '422':
+          description: Error de validación
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ValidationError'
+    delete:
+      tags: [Profile]
+      summary: Eliminar avatar
+      responses:
+        '200':
+          description: Avatar eliminado
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                  user:
+                    $ref: '#/components/schemas/User'
+              example:
+                message: Avatar eliminado correctamente.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /api/recipes:
+    get:
+      tags: [Recipes]
+      summary: Listar recetas (público)
+      security: []
+      description: |
+        Soporta filtros por texto, autor, categorías y fecha de publicación.
+        Incluye paginación.
+      parameters:
+        - in: query
+          name: q
+          schema:
+            type: string
+          description: Texto libre para buscar en título, resumen, descripción e ingredientes.
+        - in: query
+          name: author_id
+          schema:
+            type: integer
+        - in: query
+          name: category_ids[]
+          schema:
+            type: array
+            items:
+              type: integer
+        - in: query
+          name: published_from
+          schema:
+            type: string
+            format: date
+        - in: query
+          name: published_to
+          schema:
+            type: string
+            format: date
+        - in: query
+          name: per_page
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 50
+            default: 12
+      responses:
+        '200':
+          description: Lista paginada de recetas
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RecipePaginatedResponse'
+              example:
+                data:
+                  - id: 10
+                    title: Salsa de tomate casera
+                    summary: Receta familiar
+                    description: Cocción lenta con jitomate y cebolla
+                    servings: 4
+                    prep_time_minutes: 10
+                    cook_time_minutes: 20
+                    status: published
+                    published_at: '2026-02-27T16:00:00Z'
+                    average_rating: 4.7
+                    ratings_count: 23
+                    likes_count: 16
+                    comments_count: 9
+                    author:
+                      id: 1
+                      name: Jose Manuel
+                    categories:
+                      - id: 2
+                        name: Salsas
+                        slug: salsas
+                        is_global: true
+                    main_image:
+                      id: 31
+                      type: image
+                      url: http://localhost:8000/storage/recipes/10/main.jpg
+                      is_primary: true
+                links:
+                  first: http://localhost:8000/api/recipes?page=1
+                  last: http://localhost:8000/api/recipes?page=1
+                  prev: null
+                  next: null
+                meta:
+                  current_page: 1
+                  from: 1
+                  last_page: 1
+                  path: http://localhost:8000/api/recipes
+                  per_page: 12
+                  to: 1
+                  total: 1
+
+    post:
+      tags: [Recipes]
+      summary: Crear receta
+      description: Crea receta en `draft` por defecto. Puede enviarse `status=published`, pero validará requisitos.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RecipeCreateRequest'
+            example:
+              title: Salsa de tomate casera
+              summary: Receta familiar
+              description: Salsa base para pasta y carnes.
+              servings: 4
+              prep_time_minutes: 10
+              cook_time_minutes: 20
+              category_ids: [2]
+              ingredients:
+                - name: Tomate
+                  quantity: 6
+                  unit: pieza
+                  calories: 132
+                - name: Cebolla
+                  quantity: 1
+                  unit: pieza
+                  calories: 44
+              steps:
+                - instruction: Lava y pica los ingredientes
+                - instruction: Cocina por 20 minutos a fuego medio
+      responses:
+        '201':
+          description: Receta creada
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RecipeDetail'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '422':
+          description: Error de validación
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ValidationError'
+
+  /api/recipes/{recipe}:
+    get:
+      tags: [Recipes]
+      summary: Obtener detalle de receta
+      security: []
+      parameters:
+        - $ref: '#/components/parameters/RecipeId'
+      responses:
+        '200':
+          description: Detalle completo
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RecipeDetail'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+    patch:
+      tags: [Recipes]
+      summary: Actualizar receta
+      parameters:
+        - $ref: '#/components/parameters/RecipeId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RecipeUpdateRequest'
+            example:
+              summary: Ajuste de sazón
+              servings: 6
+      responses:
+        '200':
+          description: Receta actualizada
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RecipeDetail'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          description: Error de validación
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ValidationError'
+
+    delete:
+      tags: [Recipes]
+      summary: Eliminar receta
+      parameters:
+        - $ref: '#/components/parameters/RecipeId'
+      responses:
+        '200':
+          description: Receta eliminada
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+              example:
+                message: Receta eliminada correctamente.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/recipes/{recipe}/media:
+    post:
+      tags: [Media]
+      summary: Subir archivo o URL externa
+      parameters:
+        - $ref: '#/components/parameters/RecipeId'
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                file:
+                  type: string
+                  format: binary
+                external_url:
+                  type: string
+                  format: uri
+                type:
+                  type: string
+                  enum: [image, video]
+                is_primary:
+                  type: boolean
+                sort_order:
+                  type: integer
+      responses:
+        '201':
+          description: Media creada
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/RecipeMedia'
+              example:
+                data:
+                  id: 40
+                  type: image
+                  url: http://localhost:8000/storage/recipes/10/main.jpg
+                  path: recipes/10/main.jpg
+                  external_url: null
+                  mime_type: image/jpeg
+                  size_bytes: 280901
+                  is_primary: true
+                  sort_order: 0
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          description: Error de validación
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ValidationError'
+
+  /api/recipes/{recipe}/publish:
+    post:
+      tags: [Recipes]
+      summary: Publicar receta
+      description: Requiere foto principal + ingredientes + pasos.
+      parameters:
+        - $ref: '#/components/parameters/RecipeId'
+      responses:
+        '200':
+          description: Receta publicada
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RecipeDetail'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          description: No cumple requisitos de publicación
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ValidationError'
+              example:
+                message: The given data was invalid.
+                errors:
+                  main_image:
+                    - La receta debe tener una foto principal antes de publicarse.
+
+  /api/recipes/{recipe}/ratings:
+    get:
+      tags: [Ratings]
+      summary: Listar ratings de receta
+      security: []
+      parameters:
+        - $ref: '#/components/parameters/RecipeId'
+      responses:
+        '200':
+          description: Lista paginada
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RatingPaginatedResponse'
+
+    post:
+      tags: [Ratings]
+      summary: Crear/actualizar rating de receta
+      security: []
+      description: |
+        - Si está autenticado, actualiza por `recipe_id + user_id`.
+        - Si es invitado, actualiza por hash de IP + receta.
+      parameters:
+        - $ref: '#/components/parameters/RecipeId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RatingRequest'
+            examples:
+              guest:
+                summary: Rating invitado
+                value:
+                  stars: 5
+                  guest_name: Doña Rosa
+                  review: Muy rica
+                  would_cook_again: true
+              user:
+                summary: Rating usuario autenticado
+                value:
+                  stars: 4
+                  review: Buen sabor, agregué ajo
+                  turned_out_well: true
+                  changes: Añadí ajo
+      responses:
+        '201':
+          description: Rating creado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RatingUpsertResponse'
+        '200':
+          description: Rating actualizado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RatingUpsertResponse'
+        '422':
+          description: Error de validación
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ValidationError'
+
+  /api/categories:
+    get:
+      tags: [Categories]
+      summary: Listar categorías
+      security: []
+      responses:
+        '200':
+          description: Categorías visibles para el usuario actual
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Category'
+
+    post:
+      tags: [Categories]
+      summary: Crear categoría
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CategoryRequest'
+            example:
+              name: Salsas
+      responses:
+        '200':
+          description: Categoría creada
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Category'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /api/feed/daily-recommendation:
+    get:
+      tags: [Feed]
+      summary: Obtener recomendación diaria
+      security: []
+      parameters:
+        - in: query
+          name: limit
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 10
+            default: 1
+      responses:
+        '200':
+          description: Recetas recomendadas
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/RecipeSummary'
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: Token
+
+  parameters:
+    RecipeId:
+      in: path
+      name: recipe
+      required: true
+      schema:
+        type: integer
+
+  responses:
+    Unauthorized:
+      description: No autenticado
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              message:
+                type: string
+          example:
+            message: Unauthenticated.
+    Forbidden:
+      description: Sin permisos
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              message:
+                type: string
+          example:
+            message: This action is unauthorized.
+    NotFound:
+      description: Recurso no encontrado
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              message:
+                type: string
+
+  schemas:
+    RegisterRequest:
+      type: object
+      required: [name, email, password, password_confirmation]
+      properties:
+        name:
+          type: string
+          maxLength: 120
+        email:
+          type: string
+          format: email
+        password:
+          type: string
+          format: password
+          minLength: 8
+        password_confirmation:
+          type: string
+          format: password
+
+    LoginRequest:
+      type: object
+      required: [email, password]
+      properties:
+        email:
+          type: string
+          format: email
+        password:
+          type: string
+          format: password
+
+    AuthResponse:
+      type: object
+      properties:
+        token_type:
+          type: string
+          example: Bearer
+        access_token:
+          type: string
+        user:
+          $ref: '#/components/schemas/User'
+
+    User:
+      type: object
+      properties:
+        id:
+          type: integer
+        name:
+          type: string
+        email:
+          type: string
+          format: email
+          nullable: true
+        role:
+          type: string
+          enum: [admin, member]
+        bio:
+          type: string
+          nullable: true
+        avatar_url:
+          type: string
+          nullable: true
+
+    UserResourceResponse:
+      type: object
+      properties:
+        data:
+          $ref: '#/components/schemas/User'
+
+    ProfileUpdateRequest:
+      type: object
+      properties:
+        name:
+          type: string
+          maxLength: 120
+        bio:
+          type: string
+          nullable: true
+          maxLength: 1000
+        avatar_url:
+          type: string
+          format: uri
+          nullable: true
+          maxLength: 2048
+
+    ProfileAvatarUploadRequest:
+      type: object
+      required: [avatar]
+      properties:
+        avatar:
+          type: string
+          format: binary
+
+    RecipeCreateRequest:
+      type: object
+      required: [title]
+      properties:
+        title:
+          type: string
+          maxLength: 255
+        summary:
+          type: string
+          nullable: true
+        description:
+          type: string
+          nullable: true
+        servings:
+          type: integer
+          nullable: true
+        prep_time_minutes:
+          type: integer
+          nullable: true
+        cook_time_minutes:
+          type: integer
+          nullable: true
+        status:
+          type: string
+          enum: [draft, published]
+          nullable: true
+        category_ids:
+          type: array
+          items:
+            type: integer
+        ingredients:
+          type: array
+          items:
+            $ref: '#/components/schemas/RecipeIngredientInput'
+        steps:
+          type: array
+          items:
+            $ref: '#/components/schemas/RecipeStepInput'
+        video_type:
+          type: string
+          enum: [upload, youtube]
+          nullable: true
+        video_url:
+          type: string
+          format: uri
+          nullable: true
+
+    RecipeUpdateRequest:
+      allOf:
+        - $ref: '#/components/schemas/RecipeCreateRequest'
+
+    RecipeIngredientInput:
+      type: object
+      required: [name]
+      properties:
+        name:
+          type: string
+        quantity:
+          type: number
+          nullable: true
+        unit:
+          type: string
+          nullable: true
+        notes:
+          type: string
+          nullable: true
+        calories:
+          type: number
+          nullable: true
+        protein_g:
+          type: number
+          nullable: true
+        carbs_g:
+          type: number
+          nullable: true
+        fat_g:
+          type: number
+          nullable: true
+
+    RecipeStepInput:
+      type: object
+      required: [instruction]
+      properties:
+        instruction:
+          type: string
+        image_path:
+          type: string
+          nullable: true
+
+    RecipeSummary:
+      type: object
+      properties:
+        id:
+          type: integer
+        title:
+          type: string
+        summary:
+          type: string
+          nullable: true
+        description:
+          type: string
+          nullable: true
+        servings:
+          type: integer
+          nullable: true
+        prep_time_minutes:
+          type: integer
+          nullable: true
+        cook_time_minutes:
+          type: integer
+          nullable: true
+        status:
+          type: string
+          enum: [draft, published]
+        published_at:
+          type: string
+          format: date-time
+          nullable: true
+        average_rating:
+          type: number
+          format: float
+          nullable: true
+        ratings_count:
+          type: integer
+          nullable: true
+        likes_count:
+          type: integer
+          nullable: true
+        comments_count:
+          type: integer
+          nullable: true
+        author:
+          type: object
+          properties:
+            id:
+              type: integer
+            name:
+              type: string
+        categories:
+          type: array
+          items:
+            $ref: '#/components/schemas/Category'
+        main_image:
+          $ref: '#/components/schemas/RecipeMedia'
+
+    RecipeDetail:
+      allOf:
+        - $ref: '#/components/schemas/RecipeSummary'
+        - type: object
+          properties:
+            nutrition:
+              type: object
+              nullable: true
+              properties:
+                calories:
+                  type: number
+                protein_g:
+                  type: number
+                carbs_g:
+                  type: number
+                fat_g:
+                  type: number
+            ingredients:
+              type: array
+              items:
+                type: object
+                properties:
+                  id: { type: integer }
+                  position: { type: integer }
+                  name: { type: string }
+                  quantity: { type: number, nullable: true }
+                  unit: { type: string, nullable: true }
+                  notes: { type: string, nullable: true }
+            steps:
+              type: array
+              items:
+                type: object
+                properties:
+                  id: { type: integer }
+                  step_number: { type: integer }
+                  instruction: { type: string }
+                  image_path: { type: string, nullable: true }
+            media:
+              type: array
+              items:
+                $ref: '#/components/schemas/RecipeMedia'
+
+    RecipeMedia:
+      type: object
+      nullable: true
+      properties:
+        id:
+          type: integer
+        type:
+          type: string
+          enum: [image, video]
+        url:
+          type: string
+          nullable: true
+        path:
+          type: string
+          nullable: true
+        external_url:
+          type: string
+          nullable: true
+        mime_type:
+          type: string
+          nullable: true
+        size_bytes:
+          type: integer
+          nullable: true
+        is_primary:
+          type: boolean
+        sort_order:
+          type: integer
+
+    RatingRequest:
+      type: object
+      required: [stars]
+      properties:
+        stars:
+          type: integer
+          minimum: 1
+          maximum: 5
+        review:
+          type: string
+          nullable: true
+        guest_name:
+          type: string
+          nullable: true
+        guest_email:
+          type: string
+          format: email
+          nullable: true
+        turned_out_well:
+          type: boolean
+          nullable: true
+        changes:
+          type: string
+          nullable: true
+        would_cook_again:
+          type: boolean
+          nullable: true
+
+    Rating:
+      type: object
+      properties:
+        id: { type: integer }
+        stars: { type: integer }
+        review: { type: string, nullable: true }
+        guest_name: { type: string, nullable: true }
+        guest_email: { type: string, nullable: true }
+        turned_out_well: { type: boolean, nullable: true }
+        changes: { type: string, nullable: true }
+        would_cook_again: { type: boolean, nullable: true }
+        user:
+          type: object
+          nullable: true
+          properties:
+            id: { type: integer }
+            name: { type: string }
+
+    RatingUpsertResponse:
+      type: object
+      properties:
+        data:
+          $ref: '#/components/schemas/Rating'
+        recipe_rating_summary:
+          type: object
+          properties:
+            average_rating:
+              type: number
+            ratings_count:
+              type: integer
+
+    CategoryRequest:
+      type: object
+      required: [name]
+      properties:
+        name:
+          type: string
+          maxLength: 100
+        is_global:
+          type: boolean
+          nullable: true
+
+    Category:
+      type: object
+      properties:
+        id: { type: integer }
+        name: { type: string }
+        slug: { type: string }
+        is_global: { type: boolean }
+
+    RecipePaginatedResponse:
+      type: object
+      properties:
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/RecipeSummary'
+        links:
+          type: object
+          additionalProperties: true
+        meta:
+          type: object
+          additionalProperties: true
+
+    RatingPaginatedResponse:
+      type: object
+      properties:
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/Rating'
+        links:
+          type: object
+          additionalProperties: true
+        meta:
+          type: object
+          additionalProperties: true
+
+    ValidationError:
+      type: object
+      properties:
+        message:
+          type: string
+        errors:
+          type: object
+          additionalProperties:
+            type: array
+            items:
+              type: string
